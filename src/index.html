@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Timer</title>
+    <style>
+        /* --- CSS (THE CLOTHES) --- */
+        :root {
+            --bg: #1d2021;
+            --surface: #3c3836;
+            --fg: #ebdbb2;
+            --accent: #83a598;
+            --red: #fb4934;
+            --green: #b8bb26;
+            --gray: #928374;
+        }
+
+        body {
+            background-color: var(--bg);
+            color: var(--fg);
+            margin: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            overflow: hidden;
+            user-select: none;
+            font-family: sans-serif;
+        }
+
+        #app { width: 100%; max-width: 400px; text-align: center; }
+
+        .nav-menu { display: flex; justify-content: center; gap: 10px; margin-bottom: 2rem; }
+        .nav-menu.small { margin-bottom: 0.5rem; }
+
+        button {
+            background: transparent;
+            border: 1px solid var(--surface);
+            color: var(--gray);
+            padding: 6px 12px;
+            cursor: pointer;
+            font-size: 0.75rem;
+            border-radius: 4px;
+            transition: all 0.2s ease;
+        }
+        button.active { color: var(--fg); border-color: var(--accent); }
+        button:hover { border-color: var(--gray); color: var(--fg); }
+
+        .mode-container { height: 260px; display: flex; align-items: center; justify-content: center; margin-bottom: 2rem; }
+
+        #numbers-display { font-size: 4rem; font-weight: 200; font-variant-numeric: tabular-nums; }
+
+        #analog-display { position: relative; }
+        .ring-svg { transform: rotate(-90deg); }
+        .ring-bg { fill: none; stroke: var(--surface); stroke-width: 8; }
+        .ring-progress {
+            fill: none;
+            stroke: var(--accent);
+            stroke-width: 8;
+            stroke-linecap: round;
+            will-change: stroke-dashoffset;
+        }
+
+        #binary-display { display: flex; flex-direction: column; gap: 15px; }
+        .binary-row { display: flex; gap: 10px; justify-content: center; }
+        .dot {
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: var(--surface);
+            will-change: background;
+        }
+        .dot.active { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+
+        .input-panel { background: var(--surface); padding: 1.5rem; border-radius: 12px; }
+        .input-row { margin-bottom: 1rem; }
+        input {
+            background: var(--bg);
+            border: 1px solid var(--gray);
+            color: var(--fg);
+            padding: 8px;
+            border-radius: 4px;
+            width: 100%;
+            text-align: center;
+            font-size: 1rem;
+        }
+
+        .main-controls { display: flex; gap: 15px; justify-content: center; }
+        .btn-start { color: var(--green); border-color: var(--green); flex: 1; }
+        .btn-reset { color: var(--red); border-color: var(--red); flex: 1; }
+
+        .hidden { display: none !important; }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <div class="nav-menu">
+            <button onclick="setMode('numbers')" id="btn-numbers" class="active">NUMBERS</button>
+            <button onclick="setMode('analog')" id="btn-analog">ANALOG</button>
+            <button onclick="setMode('binary')" id="btn-binary">BINARY</button>
+        </div>
+
+        <div class="mode-container">
+            <div id="numbers-display">00:00:00</div>
+
+            <div id="analog-display" class="hidden">
+                <svg class="ring-svg" width="250" height="250">
+                    <circle class="ring-bg" cx="125" cy="125" r="110"></circle>
+                    <circle id="progress-ring" class="ring-progress" cx="125" cy="125" r="110"></circle>
+                </svg>
+            </div>
+
+            <div id="binary-display" class="hidden">
+                <div class="binary-row" id="bin-hours"></div>
+                <div class="binary-row" id="bin-mins"></div>
+                <div class="binary-row" id="bin-secs"></div>
+            </div>
+        </div>
+
+        <div class="input-panel">
+            <div class="nav-menu small">
+                <button onclick="setInputMode('duration')" id="btn-mode-dur" class="active">DURATION</button>
+                <button onclick="setInputMode('until')" id="btn-mode-until">UNTIL</button>
+            </div>
+
+            <div id="input-duration" class="input-row">
+                <input type="text" id="dur-input" placeholder="MM:SS" value="25:00">
+            </div>
+
+            <div id="input-until" class="input-row hidden">
+                <input type="time" id="until-input">
+            </div>
+
+            <div class="main-controls">
+                <button class="btn-start" onclick="startTimer()">START</button>
+                <button class="btn-reset" onclick="resetTimer()">RESET</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        /* --- JAVASCRIPT (THE BRAINS) --- */
+        let timeLeft = 0;
+        let totalDuration = 0;
+        let timerInterval = null;
+        let currentMode = 'numbers';
+        let inputMode = 'duration';
+        let targetTimestamp = 0;
+
+        const numDisplay = document.getElementById('numbers-display');
+        const progressRing = document.getElementById('progress-ring');
+        const circumference = 2 * Math.PI * 110;
+
+        function initBinary() {
+            const createDots = (id, count) => {
+                const el = document.getElementById(id);
+                for(let i=0; i<count; i++) {
+                    const dot = document.createElement('div');
+                    dot.className = 'dot';
+                    el.appendChild(dot);
+                }
+            };
+            createDots('bin-hours', 4);
+            createDots('bin-mins', 6);
+            createDots('bin-secs', 6);
+        }
+        initBinary();
+
+        function setMode(mode) {
+            currentMode = mode;
+            document.querySelectorAll('.nav-menu button').forEach(b => b.classList.remove('active'));
+            document.getElementById(`btn-${mode}`).classList.add('active');
+            document.getElementById('numbers-display').classList.toggle('hidden', mode !== 'numbers');
+            document.getElementById('analog-display').classList.toggle('hidden', mode !== 'analog');
+            document.getElementById('binary-display').classList.toggle('hidden', mode !== 'binary');
+            updateDisplay();
+        }
+
+        function setInputMode(mode) {
+            inputMode = mode;
+            document.getElementById('btn-mode-dur').classList.toggle('active', mode === 'duration');
+            document.getElementById('btn-mode-until').classList.toggle('active', mode === 'until');
+            document.getElementById('input-duration').classList.toggle('hidden', mode !== 'duration');
+            document.getElementById('input-until').classList.toggle('hidden', mode !== 'until');
+        }
+
+        function startTimer() {
+            resetTimer();
+            if (inputMode === 'duration') {
+                const val = document.getElementById('dur-input').value;
+                const parts = val.split(':').map(Number);
+                if (parts.length === 2) timeLeft = (parts[0] * 60) + parts[1];
+                else if (parts.length === 3) timeLeft = (parts[0] * 3600) + (parts[1] * 60) + parts[2];
+            } else {
+                const timeVal = document.getElementById('until-input').value;
+                if (!timeVal) return;
+                const [h, m] = timeVal.split(':').map(Number);
+                const now = new Date();
+                targetTimestamp = new Date(now.getFullYear(), now.getMonth(), now.getDate(), h, m, 0).getTime();
+                if (targetTimestamp <= now.getTime()) targetTimestamp += 86400000;
+                totalDuration = targetTimestamp - now.getTime();
+                timeLeft = Math.floor(totalDuration / 1000);
+            }
+
+            if (timeLeft <= 0) return;
+            totalDuration = timeLeft;
+            targetTimestamp = Date.now() + (timeLeft * 1000);
+
+            timerInterval = setInterval(() => {
+                const now = Date.now();
+                const remaining = Math.max(0, Math.floor((targetTimestamp - now) / 1000));
+                if (timeLeft !== remaining) {
+                    timeLeft = remaining;
+                    updateDisplay();
+                }
+                if (timeLeft <= 0) {
+                    clearInterval(timerInterval);
+                    alert("Time is up!");
+                }
+            }, 100);
+        }
+
+        function resetTimer() {
+            clearInterval(timerInterval);
+            timeLeft = 0;
+            totalDuration = 0;
+            updateDisplay();
+        }
+
+        function updateDisplay() {
+            const h = Math.floor(timeLeft / 3600);
+            const m = Math.floor((timeLeft % 3600) / 60);
+            const s = timeLeft % 60;
+
+            const pad = (n) => n.toString().padStart(2, '0');
+            numDisplay.innerText = `${pad(h)}:${pad(m)}:${pad(s)}`;
+
+            if (currentMode === 'analog' && totalDuration > 0) {
+                const offset = circumference - (timeLeft / totalDuration) * circumference;
+                progressRing.style.strokeDasharray = `${circumference} ${circumference}`;
+                progressRing.style.strokeDashoffset = offset;
+            }
+
+            if (currentMode === 'binary') {
+                updateBinaryRow('bin-hours', h, [8, 4, 2, 1]);
+                updateBinaryRow('bin-mins', m, [32, 16, 8, 4, 2, 1]);
+                updateBinaryRow('bin-secs', s, [32, 16, 8, 4, 2, 1]);
+            }
+        }
+
+        function updateBinaryRow(id, val, weights) {
+            const dots = document.getElementById(id).children;
+            for (let i = 0; i < weights.length; i++) {
+                dots[i].classList.toggle('active', (val & weights[i]) === weights[i]);
+            }
+        }
+    </script>
+</body>
+</html>
